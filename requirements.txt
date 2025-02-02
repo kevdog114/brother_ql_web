@@ -1,3 +1,6 @@
 brother_ql
 bottle
 jinja2
+pylibdmtx
+qrcode[pil]
+pillow

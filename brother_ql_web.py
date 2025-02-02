@@ -119,8 +119,8 @@ def create_label_im(text, **kwargs):
         if line == '': line = ' '
         lines.append(line)
     text = '\n'.join(lines)
-    linesize = im_font.getsize(text)
-    textsize = draw.multiline_textsize(text, font=im_font)
+    # linesize = im_font.getsize(text)
+    # textsize = draw.multiline_textsize(text, font=im_font)
     width, height = kwargs['width'], kwargs['height']
     if kwargs['orientation'] == 'standard':
         if label_type in (ENDLESS_LABEL,):
@@ -148,6 +148,39 @@ def create_label_im(text, **kwargs):
     draw.multiline_text(offset, text, kwargs['fill_color'], font=im_font, align=kwargs['align'])
     return im
 
+
+def textsize(text, draw, font):
+    (x,y,w,h) = draw.multiline_textbbox((0,0),text, font)
+    return (w,h)
+
+def text_wrap(text,font,writing,max_width,max_height):
+    lines = [[]]
+    words = text.split()
+    for word in words:
+        # try putting this word in last line then measure
+        lines[-1].append(word)
+        (w,h) = textsize('\n'.join([' '.join(line) for line in lines]), writing, font=font)
+        #(w,h) = writing.textlength('\n'.join([' '.join(line) for line in lines]), font=font)
+        if w > max_width: # too wide
+            # take it back out, put it on the next line, then measure again
+            lines.append([lines[-1].pop()])
+            (w,h) = textsize('\n'.join([' '.join(line) for line in lines]), writing, font=font)
+            #(w,h) = writing.multiline_textsize('\n'.join([' '.join(line) for line in lines]), font=font)
+            if h > max_height: # too high now, cannot fit this word in, so take out - add ellipses
+                lines.pop()
+                # try adding ellipses to last word fitting (i.e. without a space)
+                lines[-1][-1] += '...'
+                # keep checking that this doesn't make the textbox too wide,
+                # if so, cycle through previous words until the ellipses can fit
+                while textsize('\n'.join([' '.join(line) for line in lines]),writing,font=font)[0] > max_width:
+                    lines[-1].pop()
+                    if lines[-1]:
+                        lines[-1][-1] += '...'
+                    else:
+                        lines[-1].append('...')
+                break
+    return '\n'.join([' '.join(line) for line in lines])
+
 def create_label_grocy(text, **kwargs):
     product = kwargs['product']
     duedate = kwargs['duedate']
@@ -155,13 +188,29 @@ def create_label_grocy(text, **kwargs):
 
 
     # prepare grocycode datamatrix
-    from pylibdmtx.pylibdmtx import encode
-    encoded = encode(grocycode.encode('utf8'), size="SquareAuto") # adjusted for 300x300 dpi - results in DM code roughly 5x5mm
-    datamatrix = Image.frombytes('RGB', (encoded.width, encoded.height), encoded.pixels)
+    import qrcode
+    #encoded = encode(grocycode.encode('utf8'), size="SquareAuto") # adjusted for 300x300 dpi - results in DM code roughly 5x5mm
+    #qr = qrcode.QRCode(
+    #        version=1,
+    #        box_size=5,
+    #)
+    #qr.add_data(grocycode.encode('utf8'))
+    #qr.make(fit=True)
+    encoded = qrcode.make(data=grocycode.encode('utf8'),box_size=5).get_image()
+    #encoded = qr.make_image(fill_color="black", back_color="white")
+    #datamatrix = Image.frombytes('RGB', (encoded.width, encoded.height), list(encoded.getdata()))
+    #datamatrix = encoded
+    #datamatrix.save('/tmp/dmtx.png')
+    #encoded.save("/tmp/dmtx.png")
+    #datamatrix = Image.open("/tmp/dmtx.png")
+    datamatrix = encoded.convert("RGB")
+    #datamatrix = datamatrix.convert("RGB")
     datamatrix.save('/tmp/dmtx.png')
 
-    product_font = ImageFont.truetype(kwargs['font_path'], 100)
-    duedate_font = ImageFont.truetype(kwargs['font_path'], 60)
+    font_size_title = 35
+    font_size_due = 25
+    product_font = ImageFont.truetype(kwargs['font_path'], font_size_title)
+    duedate_font = ImageFont.truetype(kwargs['font_path'], font_size_due)
     width = kwargs['width']
     height = 200
     if kwargs['orientation'] == 'rotated':
@@ -180,6 +229,10 @@ def create_label_grocy(text, **kwargs):
         datamatrix.transpose(Image.ROTATE_270)
 
     im.paste(datamatrix, (horizontal_offset, vertical_offset, horizontal_offset + encoded.width, vertical_offset + encoded.height))
+    #qr.add_data(grocycode.encode('utf8'))
+    qr_code_font = ImageFont.truetype(kwargs['font_path'], 20)
+    #qr_code_font = 
+    draw.text((horizontal_offset, vertical_offset + encoded.height), grocycode.encode('utf8'), kwargs['fill_color'], font=qr_code_font)
 
     if kwargs['orientation'] == 'standard':
         vertical_offset += -10
@@ -190,15 +243,16 @@ def create_label_grocy(text, **kwargs):
 
     textoffset = horizontal_offset, vertical_offset
 
-    draw.text(textoffset, product, kwargs['fill_color'], font=product_font)
+    product_wrap = text_wrap(product,product_font,draw,width - horizontal_offset,80)
+    draw.text(textoffset, product_wrap, kwargs['fill_color'], font=product_font)
 
     if duedate is not None:
         if kwargs['orientation'] == 'standard':
-            vertical_offset += 110
-            horizontal_offset = kwargs['margin_left']
+            vertical_offset += textsize(product_wrap, draw, product_font)[1] + 10
+            #horizontal_offset = kwargs['margin_left']
         elif kwargs['orientation'] == 'rotated':
-            vertical_offset = kwargs['margin_left']
-            horizontal_offset += 110
+            #vertical_offset = kwargs['margin_left']
+            horizontal_offset += textsize(product_wrap, draw, product_font)[1] + 10
         textoffset = horizontal_offset, vertical_offset
 
         draw.text(textoffset, duedate, kwargs['fill_color'], font=duedate_font)
